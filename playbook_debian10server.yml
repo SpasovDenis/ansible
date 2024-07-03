@@ -1,0 +1,100 @@
+- name: Базовая настройка сервера Debian 10
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Обновление списка пакетов и пакетов
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Настройка временной зоны
+      timezone:
+        name: "{{ timezone }}"
+
+    - name: Добавление нового пользователя с правами sudo
+      user:
+        name: "{{ user_name }}"
+        password: "{{ user_password | password_hash('sha512') }}"
+        groups: sudo
+        shell: /bin/bash
+
+    - name: Установка SSH сервера
+      apt:
+        name: openssh-server
+        state: present
+
+    - name: Настройка SSH
+      blockinfile:
+        path: /etc/ssh/sshd_config
+        block: |
+          Port {{ ssh_port }}
+          PermitRootLogin no
+          AllowUsers {{ user_name }}
+        backup: yes
+
+    - name: Установка брандмауэра UFW
+      apt:
+        name: ufw
+        state: present
+
+    - name: Установка и настройка брандмауэра UFW
+      block:
+        - name: Разрешение OpenSSH
+          ufw:
+            rule: allow
+            name: OpenSSH
+
+        - name: Включение UFW
+          ufw:
+            state: enabled
+
+    - name: Установка и настройка fail2ban
+      apt:
+        name: fail2ban
+        state: present
+      notify: restart fail2ban
+
+    - name: Установка необходимых утилит
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - vim
+        - curl
+        - wget
+        - git
+
+    - name: Установка необходимых пакетов
+      apt:
+        name: "{{ packages }}"
+      vars:
+        packages:
+          - python3-psycopg2
+          - postgresql-16
+          - postgresql-contrib
+
+    - name: Установка PostgreSQL
+      apt:
+        name: postgresql
+        state: present
+
+    - name: Запуск службы PostgreSQL
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Заходим в PostgreSQL и меняем пароль
+      become: yes
+      become_user: postgres
+      command: |
+        psql -c "ALTER USER postgres WITH PASSWORD {{ user_password }};"
+      ignore_errors: yes
+
+
+  handlers:
+    - name: restart fail2ban
+      service:
+        name: fail2ban
+        state: restarted
